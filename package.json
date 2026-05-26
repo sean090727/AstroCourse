@@ -1,0 +1,12 @@
+{
+  "name": "astrocourse-studio-vercel-v1",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Static Vercel deploy copy of the original AstroCourse Studio v1 app.",
+  "scripts": {
+    "preview": "node preview-server.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^1.1.1"
+  }
+}
