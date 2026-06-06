@@ -105,10 +105,11 @@ button:hover {
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px minmax(330px, 430px) minmax(460px, 1fr);
+  grid-template-columns: minmax(260px, 300px) minmax(360px, 1fr) minmax(420px, 1.1fr);
   gap: 18px;
   padding: 18px;
   min-height: 0;
+  overflow: visible;
 }
 
 .sidebar, .article-list-wrap, .editor {
@@ -230,10 +231,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .list-header {
-  display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(260px, auto);
-  align-items: end;
-  gap: 12px;
+  display: block;
   padding: 16px;
   border-bottom: 1px solid var(--line);
 }
@@ -242,13 +240,16 @@ input:focus, select:focus, textarea:focus {
 
 .list-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(76px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
   align-items: stretch;
+  margin-top: 12px;
 }
 
 .list-actions button {
-  padding: 8px 7px;
+  padding: 7px 6px;
+  font-size: 14px;
+  min-height: 36px;
   min-width: 0;
   white-space: normal;
 }
@@ -265,10 +266,11 @@ input:focus, select:focus, textarea:focus {
 
 .article-row {
   display: grid;
-  grid-template-columns: 58px 1fr;
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 10px;
   padding: 10px;
   margin-bottom: 4px;
+  align-items: stretch;
 }
 
 .article-row:hover, .article-row.active {
@@ -278,6 +280,29 @@ input:focus, select:focus, textarea:focus {
 .article-id {
   color: var(--accent-strong);
   font-weight: 800;
+}
+
+.article-id-input {
+  min-width: 0;
+  height: 40px;
+  padding: 7px 8px;
+  text-align: center;
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.article-select {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 5px 8px;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  text-align: left;
 }
 
 .article-name {
