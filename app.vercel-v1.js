@@ -1,7 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const VERCEL_LOCAL_KEY = "astrocourse.vercelV1.fullState";
-const VERCEL_PASSWORD = "0727";
+const VERCEL_PASSWORD = "1211";
 const VERCEL_SAFETY_KEY = "astrocourse.vercelV1.safetyBackup";
 const VERCEL_TEXT_BACKUP_KEY = "astrocourse.vercelV1.textBackup";
 const MAX_SHARED_BODY_SIZE = 4300000;
@@ -94,8 +94,10 @@ function ownerModeActive() {
   const params = new URLSearchParams(location.search);
   if (params.get("token") === VERCEL_PASSWORD) {
     sessionStorage.setItem("astrocourse.vercelV1.owner", "true");
+    return true;
   }
-  return sessionStorage.getItem("astrocourse.vercelV1.owner") === "true";
+  sessionStorage.removeItem("astrocourse.vercelV1.owner");
+  return false;
 }
 
 function unlockEditing() {
@@ -204,6 +206,16 @@ function renumberArticlesInChapter(chapter) {
     migrateArticleStateId(oldId, nextId);
     if (app.selectedArticleId === oldId) app.selectedArticleId = nextId;
   });
+}
+
+function normalizeArticleIdInput(article, rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return article.id;
+  const chapter = chapters().find(item => item.id === article.chapterId) || selectedChapter();
+  const prefix = articlePrefixForChapter(chapter || {});
+  if (/^\d+$/.test(value)) return prefix + "." + value.padStart(2, "0");
+  if (/^\.\d+$/.test(value)) return prefix + value.replace(/^\.(\d+)$/, (_, number) => "." + number.padStart(2, "0"));
+  return value;
 }
 
 function refreshAfterStructureChange() {
@@ -487,25 +499,78 @@ function filteredArticles() {
 
 function renderArticleList() {
   const chapter = selectedChapter();
-  $("#chapterTitle").textContent = chapter ? `${chapter.id} ${chapter.title}` : "검색 결과";
+  $("#chapterTitle").textContent = chapter ? chapter.id + " " + chapter.title : "검색 결과";
   const list = $("#articleList");
   list.innerHTML = "";
   filteredArticles().forEach(article => {
     const state = articleState(article.id);
-    const button = document.createElement("button");
-    button.className = `article-row ${article.id === app.selectedArticleId ? "active" : ""}`;
-    button.innerHTML = `
-      <span class="article-id">${article.id}</span>
-      <span>
-        <span class="article-name">${article.title}</span>
-        <span class="article-sub">${statusLabels[state.status]} · ${article.sectionTitle || article.chapterTitle}</span>
-      </span>
-    `;
-    button.addEventListener("click", () => selectArticle(article.id));
-    list.appendChild(button);
+    const row = document.createElement("div");
+    row.className = "article-row " + (article.id === app.selectedArticleId ? "active" : "");
+
+    const idInput = document.createElement("input");
+    idInput.className = "article-id-input";
+    idInput.value = article.id;
+    idInput.disabled = app.readOnly;
+    idInput.setAttribute("aria-label", "글 번호");
+    let articleIdCommitTimer = null;
+    const commitArticleIdInput = (event) => {
+      event.stopPropagation();
+      clearTimeout(articleIdCommitTimer);
+      updateArticleId(article.id, idInput.value.trim());
+    };
+    idInput.addEventListener("click", event => event.stopPropagation());
+    idInput.addEventListener("change", commitArticleIdInput);
+    idInput.addEventListener("blur", commitArticleIdInput);
+    idInput.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitArticleIdInput(event);
+      }
+    });
+    idInput.addEventListener("input", event => {
+      event.stopPropagation();
+      clearTimeout(articleIdCommitTimer);
+      const value = idInput.value.trim();
+      if (/^\d{2,}$/.test(value) || /^\d+\.\d+$/.test(value) || /^[A-Za-z]+\d+\.\d+$/.test(value)) {
+        articleIdCommitTimer = setTimeout(() => updateArticleId(article.id, value), 450);
+      }
+    });
+
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "article-select";
+    info.innerHTML = '<span class="article-name"></span><span class="article-sub"></span>';
+    info.querySelector(".article-name").textContent = article.title;
+    info.querySelector(".article-sub").textContent = statusLabels[state.status] + " · " + (article.sectionTitle || article.chapterTitle);
+    info.addEventListener("click", () => selectArticle(article.id));
+
+    row.appendChild(idInput);
+    row.appendChild(info);
+    list.appendChild(row);
   });
 }
 
+function updateArticleId(oldId, nextId) {
+  if (app.readOnly) return;
+  const article = articles().find(item => item.id === oldId);
+  if (!article) return renderArticleList();
+  nextId = normalizeArticleIdInput(article, nextId);
+  if (!nextId || nextId === oldId) return renderArticleList();
+  if (articles().some(item => item.id === nextId)) {
+    alert("이미 같은 글 번호가 있습니다.");
+    return renderArticleList();
+  }
+  article.id = nextId;
+  migrateArticleStateId(oldId, nextId);
+  if (app.selectedArticleId === oldId) app.selectedArticleId = nextId;
+  markDirty();
+  renderChapters();
+  renderDashboard();
+  renderArticleList();
+  selectArticle(nextId);
+  $("#saveState").textContent = "글 번호 변경됨";
+}
 function selectArticle(id) {
   collectEditor();
   app.selectedArticleId = id;
@@ -768,8 +833,9 @@ function moveSelectedArticle(delta) {
   if (nextIndex < 0 || nextIndex >= chapter.articles.length) return alert("더 이상 이동할 수 없습니다.");
   const item = chapter.articles.splice(index, 1)[0];
   chapter.articles.splice(nextIndex, 0, item);
+  renumberArticlesInChapter(chapter);
   refreshAfterStructureChange();
-  $("#saveState").textContent = "글 순서 변경됨";
+  $("#saveState").textContent = "글 순서/번호 변경됨";
 }
 
 function moveArticleToChapter() {
@@ -991,7 +1057,7 @@ async function fetchSource() {
 function switchCourse(courseId) {
   if (lockedCourse(courseId)) {
     const password = prompt("이 탭은 비밀번호가 필요합니다.");
-    if (password !== "0727") {
+    if (password !== VERCEL_PASSWORD) {
       alert("비밀번호가 맞지 않습니다.");
       renderCourseSelect();
       return;
@@ -1013,6 +1079,27 @@ function switchCourse(courseId) {
   renderAll();
 }
 
+function normalizeActionLabels() {
+  const labels = {
+    addChapterBtn: "목차+",
+    renameChapterBtn: "이름",
+    deleteChapterBtn: "삭제",
+    moveChapterUpBtn: "↑",
+    moveChapterDownBtn: "↓",
+    renumberChaptersBtn: "순번",
+    addArticleBtn: "글+",
+    renameArticleBtn: "제목",
+    deleteArticleBtn: "삭제",
+    moveArticleUpBtn: "↑",
+    moveArticleDownBtn: "↓",
+    moveArticleChapterBtn: "이동",
+    renumberArticlesBtn: "순번"
+  };
+  Object.entries(labels).forEach(([id, label]) => {
+    const element = $("#" + id);
+    if (element) element.textContent = label;
+  });
+}
 function bindEvents() {
   $("#saveBtn").addEventListener("click", () => app.readOnly ? unlockEditing() : save().catch(error => alert(error.message)));
   $("#courseSelect").addEventListener("change", event => {
@@ -1061,6 +1148,7 @@ function bindEvents() {
   });
 }
 
+normalizeActionLabels();
 bindEvents();
 load().catch(error => {
   $("#saveState").textContent = "오류";
