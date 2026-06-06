@@ -228,12 +228,23 @@ async function loadSharedData() {
   }
 }
 
+function encodeJsonBase64(data) {
+  const json = JSON.stringify(data);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function saveSharedData(data) {
   try {
     const res = await fetch("/api/state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data })
+      body: JSON.stringify({ encoded: encodeJsonBase64(data) })
     });
     if (!res.ok) throw new Error("Shared state save failed: " + res.status);
     const payload = await res.json();
