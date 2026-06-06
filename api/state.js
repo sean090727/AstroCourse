@@ -49,7 +49,9 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST") {
       const body = await readBody(req);
-      const data = body.data || body;
+      const data = body.encoded
+        ? JSON.parse(Buffer.from(body.encoded, "base64").toString("utf8"))
+        : body.data || body;
       if (!data || typeof data !== "object") {
         return send(res, 400, { ok: false, error: "Invalid state payload." });
       }
