@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1d6b52">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="AstroCourse">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>AstroCourse Studio</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">AstroCourse Studio</p>
+          <h1>천문학 강좌 설계실</h1>
+        </div>
+        <div class="topbar-actions">
+          <label class="blog-switcher">
+            <span>프로젝트</span>
+            <select id="courseSelect">
+              <option value="main">원 블로그</option>
+              <option value="olympiad">올림피아드 준비 블로그</option>
+              <option value="book">책</option>
+            </select>
+          </label>
+          <button id="saveBtn" class="primary" type="button">저장</button>
+          <span id="saveState" class="save-state">불러오는 중</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar">
+          <div class="segmented" role="tablist" aria-label="첫 화면 모드">
+            <button id="treeMode" class="active" type="button">목차 트리</button>
+            <button id="dashMode" type="button">대시보드</button>
+          </div>
+          <label class="search">
+            <span>검색</span>
+            <input id="searchInput" placeholder="1.27, 리비트, 거리..." autocomplete="off">
+          </label>
+          <div id="treeTools" class="tree-actions" aria-label="목차 관리">
+            <button id="addChapterBtn" type="button">목차 추가</button>
+            <button id="renameChapterBtn" type="button">이름변경</button>
+            <button id="deleteChapterBtn" type="button">삭제</button>
+            <button id="moveChapterUpBtn" type="button">위로</button>
+            <button id="moveChapterDownBtn" type="button">아래로</button>
+            <button id="renumberChaptersBtn" type="button">챕터 순번정리</button>
+          </div>
+          <div id="treePanel" class="panel-list"></div>
+          <div id="dashboardPanel" class="dashboard hidden"></div>
+        </aside>
+
+        <section class="article-list-wrap">
+          <div class="list-header">
+            <div>
+              <p class="eyebrow">Selected Chapter</p>
+              <h2 id="chapterTitle">목차</h2>
+            </div>
+            <div class="list-actions">
+              <button id="addArticleBtn" type="button">글 추가</button>
+              <button id="renameArticleBtn" type="button">제목 변경</button>
+              <button id="deleteArticleBtn" type="button">삭제</button>
+              <button id="moveArticleUpBtn" type="button">위로</button>
+              <button id="moveArticleDownBtn" type="button">아래로</button>
+              <button id="moveArticleChapterBtn" type="button">챕터 이동</button>
+              <button id="renumberArticlesBtn" type="button">글 순번정리</button>
+              <select id="statusFilter" aria-label="상태 필터">
+                <option value="">전체 상태</option>
+                <option value="idea">아이디어</option>
+                <option value="research">자료조사</option>
+                <option value="draft">초안</option>
+                <option value="review">검토</option>
+                <option value="published">발행</option>
+              </select>
+            </div>
+          </div>
+          <div id="articleList" class="article-list"></div>
+        </section>
+
+        <section class="editor">
+          <div class="editor-header">
+            <div>
+              <p id="articleMeta" class="eyebrow">Article</p>
+              <h2 id="articleTitle">글을 선택하세요</h2>
+            </div>
+            <span id="articleStatusPill" class="pill">대기</span>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              상태
+              <select id="statusField">
+                <option value="idea">아이디어</option>
+                <option value="research">자료조사</option>
+                <option value="draft">초안</option>
+                <option value="review">검토</option>
+                <option value="published">발행</option>
+              </select>
+            </label>
+            <label>
+              우선순위
+              <select id="priorityField">
+                <option value="normal">보통</option>
+                <option value="high">높음</option>
+                <option value="low">낮음</option>
+              </select>
+            </label>
+            <label class="checkline">
+              <input id="olympiadField" type="checkbox">
+              올림피아드 준비 블로그로 분리 필요
+            </label>
+            <label class="checkline">
+              <input id="mainBlogField" type="checkbox" checked>
+              원 블로그 발행 대상
+            </label>
+          </div>
+
+          <div class="tabs">
+            <button class="tab active" data-tab="plan" type="button">글 설계</button>
+            <button class="tab" data-tab="sources" type="button">자료 수집</button>
+            <button class="tab" data-tab="olympiad" type="button">올림피아드 분리</button>
+          </div>
+
+          <div id="planTab" class="tab-panel">
+            <label>핵심 질문<textarea id="questionField" rows="2"></textarea></label>
+            <label>넣을 사실/인물/사건<textarea id="factsField" rows="4"></textarea></label>
+            <label>본문에서 다룰 개념<textarea id="conceptsField" rows="4"></textarea></label>
+            <label>나중에 회수할 개념<textarea id="deferredField" rows="3"></textarea></label>
+            <label>초안 메모<textarea id="notesField" rows="8"></textarea></label>
+          </div>
+
+          <div id="sourcesTab" class="tab-panel hidden">
+            <div class="source-mode">
+              <div>
+                <h3>수동 자료 입력</h3>
+                <p>책, 논문, NASA/APOD, 강의 링크를 직접 메모합니다.</p>
+              </div>
+              <button id="addManualSource" type="button">자료 추가</button>
+            </div>
+            <div class="source-mode">
+              <div>
+                <h3>URL 저장</h3>
+                <p>정적 배포판에서는 URL을 자료 카드로 저장합니다.</p>
+              </div>
+              <div class="fetch-row">
+                <input id="fetchUrlField" placeholder="https://..." autocomplete="off">
+                <button id="fetchUrlBtn" type="button">추가</button>
+              </div>
+            </div>
+            <div class="source-mode">
+              <div>
+                <h3>사진 업로드</h3>
+                <p>업로드한 사진은 썸네일로 저장됩니다.</p>
+              </div>
+              <label class="upload-button">
+                사진 선택
+                <input id="imageUploadField" type="file" accept="image/*" multiple>
+              </label>
+            </div>
+            <div id="imageGallery" class="image-gallery"></div>
+            <div id="imageActions" class="image-actions hidden">
+              <span id="selectedImageName">사진 선택됨</span>
+              <button id="editImageBtn" type="button">편집</button>
+              <button id="deleteImageBtn" type="button">삭제</button>
+            </div>
+            <div id="sourcesList" class="sources-list"></div>
+          </div>
+
+          <div id="olympiadTab" class="tab-panel hidden">
+            <label>분리할 수식/유도<textarea id="mathField" rows="6"></textarea></label>
+            <label>분리할 문제 아이디어<textarea id="problemField" rows="6"></textarea></label>
+            <label>준비 블로그 링크/상태<textarea id="solutionLinkField" rows="3"></textarea></label>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="sourceTemplate">
+      <article class="source-card">
+        <input class="source-title" placeholder="자료 제목">
+        <input class="source-url" placeholder="URL 또는 책 정보">
+        <textarea class="source-note" rows="3" placeholder="이 자료에서 가져갈 내용"></textarea>
+        <button class="remove-source" type="button">삭제</button>
+      </article>
+    </template>
+
+    <script src="/app.vercel-v1.js"></script>
+  </body>
+</html>
