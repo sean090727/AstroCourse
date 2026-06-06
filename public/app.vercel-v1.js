@@ -2,6 +2,10 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const VERCEL_LOCAL_KEY = "astrocourse.vercelV1.fullState";
 const VERCEL_PASSWORD = "0727";
+const VERCEL_SAFETY_KEY = "astrocourse.vercelV1.safetyBackup";
+const VERCEL_TEXT_BACKUP_KEY = "astrocourse.vercelV1.textBackup";
+const MAX_SHARED_BODY_SIZE = 4300000;
+const MAX_IMAGE_DATA_URL_SIZE = 850000;
 
 
 const statusLabels = {
@@ -86,6 +90,130 @@ function markDirty() {
   $("#saveState").textContent = "저장 필요";
 }
 
+function ownerModeActive() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("token") === VERCEL_PASSWORD) {
+    sessionStorage.setItem("astrocourse.vercelV1.owner", "true");
+  }
+  return sessionStorage.getItem("astrocourse.vercelV1.owner") === "true";
+}
+
+function unlockEditing() {
+  const password = prompt("편집 비밀번호를 입력하세요.");
+  if (password !== VERCEL_PASSWORD) {
+    alert("비밀번호가 맞지 않습니다.");
+    return;
+  }
+  sessionStorage.setItem("astrocourse.vercelV1.owner", "true");
+  const params = new URLSearchParams(location.search);
+  params.set("token", VERCEL_PASSWORD);
+  params.set("course", app.currentCourseId || "book");
+  location.href = location.pathname + "?" + params.toString();
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function buildFullData() {
+  app.state.courses = app.courses;
+  app.state.settings = app.state.settings || {};
+  app.state.settings.currentCourseId = app.currentCourseId;
+
+  const full = app.fullData || { courses: {}, state: { articles: {}, settings: {}, courses: {} } };
+  full.state = full.state || { articles: {}, settings: {}, courses: {} };
+  full.state.articles = full.state.articles || {};
+  full.state.settings = full.state.settings || {};
+  full.state.courses = full.state.courses || full.courses || {};
+  full.courses = full.state.courses;
+
+  Object.entries(app.courses || {}).forEach(([id, course]) => {
+    full.state.courses[id] = course;
+  });
+  Object.entries(app.state.articles || {}).forEach(([key, value]) => {
+    full.state.articles[key] = value;
+  });
+  full.state.settings.currentCourseId = app.currentCourseId;
+  full.state.settings.publicReadOnly = false;
+  full.state.settings.lockedCourses = [];
+  return full;
+}
+
+function dataWithoutImages(data) {
+  const copy = cloneData(data);
+  Object.values(copy.state?.articles || {}).forEach(article => {
+    if (Array.isArray(article.images) && article.images.length) {
+      article.images = article.images.map(image => ({
+        id: image.id,
+        name: image.name,
+        type: image.type,
+        omittedFromSharedSave: true
+      }));
+    }
+  });
+  return copy;
+}
+
+function storeSafetyBackup(data) {
+  try {
+    localStorage.setItem(VERCEL_SAFETY_KEY, JSON.stringify({ savedAt: new Date().toISOString(), data }));
+  } catch (error) {
+    try {
+      localStorage.setItem(VERCEL_TEXT_BACKUP_KEY, JSON.stringify({ savedAt: new Date().toISOString(), data: dataWithoutImages(data) }));
+    } catch {}
+  }
+}
+
+let safetyTimer = null;
+function scheduleSafetyBackup() {
+  if (app.readOnly) return;
+  clearTimeout(safetyTimer);
+  safetyTimer = setTimeout(() => {
+    try {
+      collectEditor();
+      storeSafetyBackup(buildFullData());
+    } catch (error) {
+      console.warn("Safety backup failed", error);
+    }
+  }, 500);
+}
+
+function migrateArticleStateId(oldId, newId) {
+  if (oldId === newId) return;
+  const oldKey = stateKey(oldId);
+  const newKey = stateKey(newId);
+  if (app.state.articles[oldKey] && !app.state.articles[newKey]) {
+    app.state.articles[newKey] = app.state.articles[oldKey];
+    delete app.state.articles[oldKey];
+  }
+}
+
+function articlePrefixForChapter(chapter) {
+  if (/^[A-Za-z]+\d+/.test(chapter.id)) return chapter.id;
+  return chapter.id.match(/^(\d+)/)?.[1] || chapter.id || "0";
+}
+
+function renumberArticlesInChapter(chapter) {
+  const prefix = articlePrefixForChapter(chapter);
+  (chapter.articles || []).forEach((article, index) => {
+    const oldId = article.id;
+    const nextId = prefix + "." + String(index + 1).padStart(2, "0");
+    article.id = nextId;
+    article.chapterId = chapter.id;
+    article.chapterTitle = chapter.title;
+    migrateArticleStateId(oldId, nextId);
+    if (app.selectedArticleId === oldId) app.selectedArticleId = nextId;
+  });
+}
+
+function refreshAfterStructureChange() {
+  markDirty();
+  renderChapters();
+  renderDashboard();
+  renderArticleList();
+  if (app.selectedArticleId) selectArticle(app.selectedArticleId);
+  else clearEditor();
+}
 async function loadSharedData() {
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
@@ -140,7 +268,7 @@ async function load() {
   const requestedCourse = params.get("course");
   const tokenOwner = params.get("token") === VERCEL_PASSWORD;
   if (tokenOwner) sessionStorage.setItem("astrocourse.vercelV1.owner", "true");
-  const ownerMode = tokenOwner || sessionStorage.getItem("astrocourse.vercelV1.owner") === "true";
+  const ownerMode = ownerModeActive();
 
   app.fullData = data;
   app.state = JSON.parse(JSON.stringify(data.state || { articles: {}, settings: {}, courses: data.courses || {} }));
@@ -148,7 +276,7 @@ async function load() {
   app.state.settings = app.state.settings || {};
   app.courses = app.state.courses || data.courses || {};
   app.state.courses = app.courses;
-  app.readOnly = false;
+  app.readOnly = !ownerMode;
   app.lockedCourses = [];
 
   if (shareMode && !ownerMode && app.courses.book) {
@@ -176,26 +304,8 @@ async function save() {
     return;
   }
   collectEditor();
-  app.state.courses = app.courses;
-  app.state.settings = app.state.settings || {};
-  app.state.settings.currentCourseId = app.currentCourseId;
-
-  const full = app.fullData || { courses: {}, state: { articles: {}, settings: {}, courses: {} } };
-  full.state = full.state || { articles: {}, settings: {}, courses: {} };
-  full.state.articles = full.state.articles || {};
-  full.state.settings = full.state.settings || {};
-  full.state.courses = full.state.courses || full.courses || {};
-  full.courses = full.state.courses;
-
-  Object.entries(app.courses || {}).forEach(([id, course]) => {
-    full.state.courses[id] = course;
-  });
-  Object.entries(app.state.articles || {}).forEach(([key, value]) => {
-    full.state.articles[key] = value;
-  });
-  full.state.settings.currentCourseId = app.currentCourseId;
-  full.state.settings.publicReadOnly = false;
-  full.state.settings.lockedCourses = [];
+  const full = buildFullData();
+  storeSafetyBackup(full);
 
   let localSaved = false;
   try {
@@ -207,7 +317,17 @@ async function save() {
     alert("브라우저 저장공간이 부족해서 백업 JSON 파일을 만들었어요. 이미지가 많으면 이런 일이 생길 수 있어요.");
   }
 
-  const sharedSaved = await saveSharedData(full);
+  let dataForShared = full;
+  let imagesOmitted = false;
+  if (JSON.stringify({ data: dataForShared }).length > MAX_SHARED_BODY_SIZE) {
+    dataForShared = dataWithoutImages(full);
+    imagesOmitted = true;
+  }
+
+  const sharedSaved = await saveSharedData(dataForShared);
+  if (imagesOmitted) {
+    alert("사진 때문에 공유 저장 용량이 커져서, 글/초안은 공유 저장하고 사진은 이 기기 안전백업에만 남겼어요.");
+  }
 
   app.dirty = false;
   $("#saveState").textContent = sharedSaved ? "공유 저장됨" : (localSaved ? "내 기기 저장됨" : "백업 파일 저장됨");
@@ -265,7 +385,6 @@ function renderCourseSelect() {
 
 function applyAccessMode() {
   const editableIds = [
-    "saveBtn",
     "addChapterBtn",
     "renameChapterBtn",
     "deleteChapterBtn",
@@ -287,6 +406,8 @@ function applyAccessMode() {
   if (upload) upload.disabled = app.readOnly;
 
   $("#courseSelect").disabled = false;
+  const saveButton = $("#saveBtn");
+  if (saveButton) saveButton.textContent = app.readOnly ? "편집 잠금 해제" : "저장";
 }
 
 function renderChapters() {
@@ -582,6 +703,85 @@ function deleteChapter() {
   else clearEditor();
 }
 
+function moveSelectedChapter(delta) {
+  if (app.readOnly) return;
+  collectEditor();
+  const course = currentCourse();
+  const index = chapters().findIndex(chapter => chapter.id === app.selectedChapterId);
+  const nextIndex = index + delta;
+  if (!course || index < 0 || nextIndex < 0 || nextIndex >= course.chapters.length) return;
+  const item = course.chapters.splice(index, 1)[0];
+  course.chapters.splice(nextIndex, 0, item);
+  refreshAfterStructureChange();
+}
+
+function renumberChapters() {
+  if (app.readOnly) return;
+  collectEditor();
+  const course = currentCourse();
+  if (!course) return;
+  const prefix = app.currentCourseId === "book" ? "B" : app.currentCourseId === "olympiad" ? "O" : "";
+  course.chapters.forEach((chapter, index) => {
+    const oldId = chapter.id;
+    const nextId = prefix + index;
+    chapter.id = nextId;
+    (chapter.articles || []).forEach(article => {
+      article.chapterId = nextId;
+      article.chapterTitle = chapter.title;
+    });
+    if (app.selectedChapterId === oldId) app.selectedChapterId = nextId;
+    renumberArticlesInChapter(chapter);
+  });
+  refreshAfterStructureChange();
+}
+
+function moveSelectedArticle(delta) {
+  if (app.readOnly) return;
+  collectEditor();
+  const chapter = selectedChapter();
+  if (!chapter) return;
+  const index = chapter.articles.findIndex(article => article.id === app.selectedArticleId);
+  const nextIndex = index + delta;
+  if (index < 0 || nextIndex < 0 || nextIndex >= chapter.articles.length) return;
+  const item = chapter.articles.splice(index, 1)[0];
+  chapter.articles.splice(nextIndex, 0, item);
+  refreshAfterStructureChange();
+}
+
+function moveArticleToChapter() {
+  if (app.readOnly) return;
+  collectEditor();
+  const article = selectedArticle();
+  const source = selectedChapter();
+  if (!article || !source) return;
+  const options = chapters().map((chapter, index) => (index + 1) + ". " + chapter.id + " " + chapter.title).join("\n");
+  const raw = prompt("이동할 챕터 번호를 입력하세요:\n\n" + options);
+  if (!raw) return;
+  const target = chapters()[Number(raw) - 1] || chapters().find(chapter => chapter.id === raw.trim());
+  if (!target || target.id === source.id) return;
+  const newId = prompt("이동 후 글 번호를 입력하세요", nextArticleId(target));
+  if (!newId) return;
+  source.articles = source.articles.filter(item => item.id !== article.id);
+  const oldId = article.id;
+  article.id = newId;
+  article.chapterId = target.id;
+  article.chapterTitle = target.title;
+  article.sectionTitle = "";
+  target.articles.push(article);
+  migrateArticleStateId(oldId, newId);
+  app.selectedChapterId = target.id;
+  app.selectedArticleId = newId;
+  refreshAfterStructureChange();
+}
+
+function renumberSelectedArticles() {
+  if (app.readOnly) return;
+  collectEditor();
+  const chapter = selectedChapter();
+  if (!chapter) return;
+  renumberArticlesInChapter(chapter);
+  refreshAfterStructureChange();
+}
 function renderSources(sources) {
   const list = $("#sourcesList");
   list.innerHTML = "";
@@ -643,26 +843,72 @@ function renderImageActions() {
   $("#selectedImageName").textContent = image ? image.name || "사진 선택됨" : "사진 선택됨";
 }
 
-function addImages(files) {
-  if (app.readOnly || !app.selectedArticleId || !selectedArticle()) return;
-  const images = currentImages();
-  [...files].forEach(file => {
-    if (!file.type.startsWith("image/")) return;
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      images.push({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: file.name,
-        type: file.type,
-        dataUrl: reader.result
-      });
-      markDirty();
-      renderImages(images);
-    };
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("File read failed"));
     reader.readAsDataURL(file);
   });
 }
 
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+}
+
+async function compressImageFile(file) {
+  const original = await readFileAsDataUrl(file);
+  if (original.length <= MAX_IMAGE_DATA_URL_SIZE) return original;
+  const image = await loadImageFromDataUrl(original);
+  const maxWidth = 1200;
+  const scale = Math.min(1, maxWidth / image.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  let quality = 0.72;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+  while (dataUrl.length > MAX_IMAGE_DATA_URL_SIZE && quality > 0.38) {
+    quality -= 0.08;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+  if (dataUrl.length > MAX_IMAGE_DATA_URL_SIZE) {
+    throw new Error(file.name + " 파일이 너무 큽니다. 캡처 영역을 줄이거나 사진을 압축해서 다시 올려주세요.");
+  }
+  return dataUrl;
+}
+
+async function addImages(files) {
+  if (app.readOnly) return;
+  if (!app.selectedArticleId || !selectedArticle()) {
+    alert("사진을 넣을 글을 먼저 선택하세요.");
+    return;
+  }
+  const images = currentImages();
+  for (const file of [...files]) {
+    if (!file.type.startsWith("image/")) continue;
+    try {
+      const dataUrl = await compressImageFile(file);
+      images.push({
+        id: Date.now() + "-" + Math.random().toString(16).slice(2),
+        name: file.name,
+        type: "image/jpeg",
+        dataUrl
+      });
+      markDirty();
+      renderImages(images);
+      scheduleSafetyBackup();
+    } catch (error) {
+      alert(error.message || "사진 업로드에 실패했습니다.");
+    }
+  }
+}
 function editSelectedImage() {
   if (app.readOnly) return;
   const image = currentImages().find(item => item.id === app.selectedImageId);
@@ -742,7 +988,7 @@ function switchCourse(courseId) {
 }
 
 function bindEvents() {
-  $("#saveBtn").addEventListener("click", () => save().catch(error => alert(error.message)));
+  $("#saveBtn").addEventListener("click", () => app.readOnly ? unlockEditing() : save().catch(error => alert(error.message)));
   $("#courseSelect").addEventListener("change", event => {
     switchCourse(event.target.value);
     markDirty();
@@ -752,9 +998,16 @@ function bindEvents() {
   $("#addChapterBtn").addEventListener("click", addChapter);
   $("#renameChapterBtn").addEventListener("click", renameChapter);
   $("#deleteChapterBtn").addEventListener("click", deleteChapter);
+  $("#moveChapterUpBtn")?.addEventListener("click", () => moveSelectedChapter(-1));
+  $("#moveChapterDownBtn")?.addEventListener("click", () => moveSelectedChapter(1));
+  $("#renumberChaptersBtn")?.addEventListener("click", renumberChapters);
   $("#addArticleBtn").addEventListener("click", addArticle);
   $("#renameArticleBtn").addEventListener("click", renameArticle);
   $("#deleteArticleBtn").addEventListener("click", deleteArticle);
+  $("#moveArticleUpBtn")?.addEventListener("click", () => moveSelectedArticle(-1));
+  $("#moveArticleDownBtn")?.addEventListener("click", () => moveSelectedArticle(1));
+  $("#moveArticleChapterBtn")?.addEventListener("click", moveArticleToChapter);
+  $("#renumberArticlesBtn")?.addEventListener("click", renumberSelectedArticles);
   $("#searchInput").addEventListener("input", () => {
     app.selectedChapterId = "";
     renderChapters();
@@ -773,8 +1026,8 @@ function bindEvents() {
   });
   $("#editImageBtn").addEventListener("click", editSelectedImage);
   $("#deleteImageBtn").addEventListener("click", deleteSelectedImage);
-  $(".editor").addEventListener("input", markDirty);
-  $(".editor").addEventListener("change", markDirty);
+  $(".editor").addEventListener("input", () => { markDirty(); scheduleSafetyBackup(); });
+  $(".editor").addEventListener("change", () => { markDirty(); scheduleSafetyBackup(); });
   window.addEventListener("beforeunload", (event) => {
     if (!app.dirty) return;
     event.preventDefault();
