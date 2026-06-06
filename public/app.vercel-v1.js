@@ -402,6 +402,13 @@ function applyAccessMode() {
     "addArticleBtn",
     "renameArticleBtn",
     "deleteArticleBtn",
+    "moveChapterUpBtn",
+    "moveChapterDownBtn",
+    "renumberChaptersBtn",
+    "moveArticleUpBtn",
+    "moveArticleDownBtn",
+    "moveArticleChapterBtn",
+    "renumberArticlesBtn",
     "addManualSource",
     "fetchUrlBtn"
   ];
@@ -720,10 +727,12 @@ function moveSelectedChapter(delta) {
   const course = currentCourse();
   const index = chapters().findIndex(chapter => chapter.id === app.selectedChapterId);
   const nextIndex = index + delta;
-  if (!course || index < 0 || nextIndex < 0 || nextIndex >= course.chapters.length) return;
+  if (!course || index < 0) return alert("이동할 챕터를 먼저 선택하세요.");
+  if (nextIndex < 0 || nextIndex >= course.chapters.length) return alert("더 이상 이동할 수 없습니다.");
   const item = course.chapters.splice(index, 1)[0];
   course.chapters.splice(nextIndex, 0, item);
   refreshAfterStructureChange();
+  $("#saveState").textContent = "챕터 순서 변경됨";
 }
 
 function renumberChapters() {
@@ -731,6 +740,7 @@ function renumberChapters() {
   collectEditor();
   const course = currentCourse();
   if (!course) return;
+  if (!confirm("현재 프로젝트의 모든 챕터와 글 번호를 화면 순서대로 다시 매길까요?")) return;
   const prefix = app.currentCourseId === "book" ? "B" : app.currentCourseId === "olympiad" ? "O" : "";
   course.chapters.forEach((chapter, index) => {
     const oldId = chapter.id;
@@ -744,19 +754,22 @@ function renumberChapters() {
     renumberArticlesInChapter(chapter);
   });
   refreshAfterStructureChange();
+  $("#saveState").textContent = "챕터/글 순번 정리됨";
 }
 
 function moveSelectedArticle(delta) {
   if (app.readOnly) return;
   collectEditor();
   const chapter = selectedChapter();
-  if (!chapter) return;
+  if (!chapter) return alert("글이 속한 챕터를 먼저 선택하세요.");
   const index = chapter.articles.findIndex(article => article.id === app.selectedArticleId);
   const nextIndex = index + delta;
-  if (index < 0 || nextIndex < 0 || nextIndex >= chapter.articles.length) return;
+  if (index < 0) return alert("이동할 글을 먼저 선택하세요.");
+  if (nextIndex < 0 || nextIndex >= chapter.articles.length) return alert("더 이상 이동할 수 없습니다.");
   const item = chapter.articles.splice(index, 1)[0];
   chapter.articles.splice(nextIndex, 0, item);
   refreshAfterStructureChange();
+  $("#saveState").textContent = "글 순서 변경됨";
 }
 
 function moveArticleToChapter() {
@@ -789,9 +802,11 @@ function renumberSelectedArticles() {
   if (app.readOnly) return;
   collectEditor();
   const chapter = selectedChapter();
-  if (!chapter) return;
+  if (!chapter) return alert("순번을 정리할 챕터를 먼저 선택하세요.");
+  if (!confirm(chapter.id + " " + chapter.title + " 안의 글 번호를 화면 순서대로 다시 매길까요?")) return;
   renumberArticlesInChapter(chapter);
   refreshAfterStructureChange();
+  $("#saveState").textContent = "글 순번 정리됨";
 }
 function renderSources(sources) {
   const list = $("#sourcesList");
