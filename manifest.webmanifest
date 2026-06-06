@@ -1,0 +1,9 @@
+{
+  "name": "AstroCourse Studio",
+  "short_name": "AstroCourse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7f3",
+  "theme_color": "#1d6b52",
+  "description": "천문학 블로그, 올림피아드 준비, 책 원고를 관리하는 로컬 작업실입니다."
+}
