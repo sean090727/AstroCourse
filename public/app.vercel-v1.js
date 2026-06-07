@@ -149,7 +149,9 @@ function dataWithoutImages(data) {
         id: image.id,
         name: image.name,
         type: image.type,
-        omittedFromSharedSave: true
+        url: image.url || "",
+        uploaded: !!image.url,
+        omittedFromSharedSave: !image.url
       }));
     }
   });
@@ -178,6 +180,25 @@ function scheduleSafetyBackup() {
       console.warn("Safety backup failed", error);
     }
   }, 500);
+}
+
+let sharedAutosaveTimer = null;
+function scheduleSharedAutosave() {
+  if (app.readOnly) return;
+  clearTimeout(sharedAutosaveTimer);
+  sharedAutosaveTimer = setTimeout(async () => {
+    try {
+      collectEditor();
+      const full = buildFullData();
+      storeSafetyBackup(full);
+      const ok = await saveSharedData(dataWithoutImages(full));
+      $("#saveState").textContent = ok ? "자동 공유 저장됨" : "자동 공유 저장 실패";
+      if (ok) app.fullData = full;
+    } catch (error) {
+      console.warn("Shared autosave failed", error);
+      $("#saveState").textContent = "자동 공유 저장 실패";
+    }
+  }, 2500);
 }
 
 function migrateArticleStateId(oldId, newId) {
@@ -268,6 +289,51 @@ async function saveSharedData(data) {
   }
 }
 
+async function uploadImageDataUrl(image, articleId) {
+  if (image.url) return image;
+  if (!image.dataUrl) return image;
+  const res = await fetch("/api/image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: image.name || "image.jpg",
+      articleId,
+      dataUrl: image.dataUrl
+    })
+  });
+  const payload = await res.json().catch(() => null);
+  if (!res.ok || !payload?.ok || !payload.url) {
+    throw new Error(payload?.error || "사진 서버 업로드에 실패했습니다.");
+  }
+  return {
+    id: image.id,
+    name: image.name,
+    type: image.type || payload.contentType || "image/jpeg",
+    url: payload.url,
+    uploadedAt: new Date().toISOString()
+  };
+}
+
+async function uploadPendingImagesForSharedSave() {
+  const entries = Object.entries(app.state?.articles || {});
+  let uploadedCount = 0;
+  for (const [articleKey, articleState] of entries) {
+    if (!Array.isArray(articleState.images)) continue;
+    const nextImages = [];
+    for (const image of articleState.images) {
+      if (image?.dataUrl && !image?.url) {
+        $("#saveState").textContent = "사진 업로드 중...";
+        nextImages.push(await uploadImageDataUrl(image, articleKey));
+        uploadedCount += 1;
+      } else {
+        nextImages.push(image);
+      }
+    }
+    articleState.images = nextImages;
+  }
+  return uploadedCount;
+}
+
 async function load() {
   let data = await loadSharedData();
   let loadedFromShared = !!data;
@@ -354,6 +420,52 @@ async function save() {
 
   app.dirty = false;
   $("#saveState").textContent = sharedSaved ? "공유 저장됨" : (localSaved ? "내 기기 저장됨" : "백업 파일 저장됨");
+  renderDashboard();
+  renderArticleList();
+}
+
+async function robustSave() {
+  if (app.readOnly) {
+    alert("읽기 전용 모드에서는 저장할 수 없습니다.");
+    return;
+  }
+  collectEditor();
+  $("#saveState").textContent = "저장 중...";
+
+  try {
+    await uploadPendingImagesForSharedSave();
+  } catch (error) {
+    const backup = buildFullData();
+    storeSafetyBackup(backup);
+    downloadVercelBackup(backup);
+    app.dirty = true;
+    $("#saveState").textContent = "사진 저장 실패";
+    alert((error.message || "사진 서버 업로드에 실패했습니다.") + "\n\n공유 저장을 중단했습니다. 상대에게 반영되지 않았고, JSON 백업 파일을 내려받게 했습니다.");
+    return;
+  }
+
+  const full = buildFullData();
+  storeSafetyBackup(full);
+
+  try {
+    localStorage.setItem(VERCEL_LOCAL_KEY, JSON.stringify(full));
+    app.fullData = full;
+  } catch (error) {
+    downloadVercelBackup(full);
+    alert("이 기기 임시 저장 공간이 부족해서 JSON 백업 파일을 만들었습니다. 서버 공유 저장은 계속 시도합니다.");
+  }
+
+  const sharedSaved = await saveSharedData(full);
+  if (!sharedSaved) {
+    app.dirty = true;
+    $("#saveState").textContent = "공유 저장 실패";
+    downloadVercelBackup(full);
+    alert("공유 서버 저장에 실패했습니다.\n\n상대 컴퓨터에는 아직 반영되지 않았습니다. 방금 내용은 JSON 백업 파일로도 내려받게 했습니다.");
+    return;
+  }
+
+  app.dirty = false;
+  $("#saveState").textContent = "공유 저장됨";
   renderDashboard();
   renderArticleList();
 }
@@ -916,7 +1028,7 @@ function renderImages(images) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `image-tile ${image.id === app.selectedImageId ? "active" : ""}`;
-    button.innerHTML = `<img src="${image.dataUrl}" alt="${image.name || "uploaded image"}"><span>${image.name || "사진"}</span>`;
+    button.innerHTML = `<img src="${image.url || image.dataUrl || ""}" alt="${image.name || "uploaded image"}"><span>${image.name || "??"}</span>`;
     button.addEventListener("click", () => {
       app.selectedImageId = image.id;
       renderImages(currentImages());
@@ -1101,7 +1213,10 @@ function normalizeActionLabels() {
   });
 }
 function bindEvents() {
-  $("#saveBtn").addEventListener("click", () => app.readOnly ? unlockEditing() : save().catch(error => alert(error.message)));
+  $("#saveBtn").addEventListener("click", () => app.readOnly ? unlockEditing() : robustSave().catch(error => {
+    $("#saveState").textContent = "공유 저장 실패";
+    alert(error.message || "저장에 실패했습니다.");
+  }));
   $("#courseSelect").addEventListener("change", event => {
     switchCourse(event.target.value);
     markDirty();
@@ -1139,8 +1254,8 @@ function bindEvents() {
   });
   $("#editImageBtn").addEventListener("click", editSelectedImage);
   $("#deleteImageBtn").addEventListener("click", deleteSelectedImage);
-  $(".editor").addEventListener("input", () => { markDirty(); scheduleSafetyBackup(); });
-  $(".editor").addEventListener("change", () => { markDirty(); scheduleSafetyBackup(); });
+  $(".editor").addEventListener("input", () => { markDirty(); scheduleSafetyBackup(); scheduleSharedAutosave(); });
+  $(".editor").addEventListener("change", () => { markDirty(); scheduleSafetyBackup(); scheduleSharedAutosave(); });
   window.addEventListener("beforeunload", (event) => {
     if (!app.dirty) return;
     event.preventDefault();
