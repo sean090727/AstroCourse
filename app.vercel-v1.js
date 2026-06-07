@@ -1157,15 +1157,16 @@ async function fetchSource() {
   if (app.readOnly) return;
   const url = $("#fetchUrlField").value.trim();
   if (!url) return;
-  addSourceCard({
-    title: url,
-    url,
-    note: "Vercel 정적 배포판에서는 외부 페이지 자동 읽기 대신 URL을 자료 카드로 저장합니다."
-  });
+  let title = "?? ??";
+  try {
+    title = new URL(url).hostname.replace(/^www\./, "") || title;
+  } catch {}
+  addSourceCard({ title, url, note: "" });
   $("#fetchUrlField").value = "";
   markDirty();
+  scheduleSafetyBackup();
+  scheduleSharedAutosave();
 }
-
 function switchCourse(courseId) {
   if (lockedCourse(courseId)) {
     const password = prompt("이 탭은 비밀번호가 필요합니다.");
